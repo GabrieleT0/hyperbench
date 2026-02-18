@@ -34,7 +34,7 @@ class Graph:
         if self.num_edges == 0:
             return self
 
-        graph_edges_tensor = torch.tensor(self.edges, dtype=torch.long)
+        edges_tensor = torch.tensor(self.edges, dtype=torch.long)
 
         # Example: edges = [[0, 1],
         #                   [1, 1],
@@ -42,8 +42,8 @@ class Graph:
         #          -> no_selfloop_mask = [True, False, True]
         #          -> edges without self-loops = [[0, 1],
         #                                         [2, 3]]
-        no_selfloop_mask = graph_edges_tensor[:, 0] != graph_edges_tensor[:, 1]
-        self.edges = graph_edges_tensor[no_selfloop_mask].tolist()
+        no_selfloop_mask = edges_tensor[:, 0] != edges_tensor[:, 1]
+        self.edges = edges_tensor[no_selfloop_mask].tolist()
         return self
 
     def to_edge_index(self) -> Tensor:
@@ -76,7 +76,8 @@ class Graph:
 
         Args:
             x: Node feature matrix. Size ``(|V|, C)``.
-            drop_rate: Randomly dropout the connections in adjacency matrix with probability ``drop_rate``. Default: ``0.0``.
+            laplacian_matrix: The GCN Laplacian matrix. Size ``(|V|, |V|)``.
+            drop_rate: Randomly dropout the connections in adjacency matrix with probability ``drop_rate``. Defaults to ``0.0``.
 
         Returns:
             The smoothed feature matrix. Size ``(|V|, C)``.
@@ -89,11 +90,11 @@ class Graph:
 class EdgeIndex:
     """
     A wrapper for edge index representation of a graph.
-    Edge index is a tensor of shape (2, |E|) where the first row contains source node indices and the second row contains destination node indices for each edge.
+    Edge index is a tensor of shape ``(2, |E|)`` where the first row contains source node indices and the second row contains destination node indices for each edge.
 
-    Example:
+    Examples:
         >>> edge_index = [[0, 1, 2],
-        >>>               [1, 0, 3]]
+        ...               [1, 0, 3]]
 
         This represents a graph with edges (0, 1), (1, 0), and (2, 3).
         The number of nodes in this graph is 4 (nodes 0, 1, 2, and 3) and the number of edges is 3.
@@ -128,17 +129,20 @@ class EdgeIndex:
         """
         Add self-loops to each node in the edge index.
 
-        Example:
+        Examples:
             >>> edge_index = [[0, 1, 2],
-            >>>               [1, 0, 3]]
+            ...               [1, 0, 3]]
             >>> edge_index_with_selfloops = [[0, 1, 2, 0, 1, 2, 3],
-            >>>                              [1, 0, 3, 0, 1, 2, 3]]
+            ...                              [1, 0, 3, 0, 1, 2, 3]]
 
         Args:
             with_duplicate_removal: Whether to remove duplicate edges after adding self-loops. Defaults to ``True``.
 
+        Returns:
+            This :class:`EdgeIndex` instance with self-loops added.
+
         Raises:
-            ValueError: If the input edge index has no edges (i.e., shape (2, 0)).
+            ValueError: If the input edge index has no edges (i.e., ``shape (2, 0)``).
         """
         if self.__edge_index.size(1) < 1:
             raise ValueError("Edge index must have at least one edge to add self-loops.")
@@ -296,6 +300,9 @@ class EdgeIndex:
 
         Args:
             with_selfloops: Whether to add self-loops to each node. Defaults to ``False``.
+
+        Returns:
+            This :class:`EdgeIndex` instance converted to undirected.
         """
         device = self.__edge_index.device
 

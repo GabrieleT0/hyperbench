@@ -81,21 +81,21 @@ class Hypergraph:
     A simple hypergraph data structure using edge list representation.
     """
 
-    def __init__(self, edges: List[List[int]]):
-        self.edges = edges
+    def __init__(self, hyperedges: List[List[int]]):
+        self.hyperedges = hyperedges
 
     @property
     def num_nodes(self) -> int:
         """Return the number of nodes in the hypergraph."""
         nodes = set()
-        for edge in self.edges:
+        for edge in self.hyperedges:
             nodes.update(edge)
         return len(nodes)
 
     @property
-    def num_edges(self) -> int:
-        """Return the number of edges in the hypergraph."""
-        return len(self.edges)
+    def num_hyperedges(self) -> int:
+        """Return the number of hyperedges in the hypergraph."""
+        return len(self.hyperedges)
 
     def neighbors_of(self, node: int) -> Neighborhood:
         """
@@ -111,9 +111,9 @@ class Hypergraph:
             A set of neighbor node IDs (excluding the node itself).
         """
         neighbors: Neighborhood = set()
-        for edge in self.edges:
-            if node in edge:
-                neighbors.update(edge)
+        for hyperedge in self.hyperedges:
+            if node in hyperedge:
+                neighbors.update(hyperedge)
 
         neighbors.discard(node)
         return neighbors
@@ -129,8 +129,8 @@ class Hypergraph:
             A dictionary mapping each node ID to its set of neighbors.
         """
         nodes: Set[int] = set()
-        for edge in self.edges:
-            nodes.update(edge)
+        for hyperedge in self.hyperedges:
+            nodes.update(hyperedge)
 
         node_to_neighbors: Dict[int, Neighborhood] = {}
         for node in nodes:
@@ -150,15 +150,15 @@ class Hypergraph:
             Hypergraph instance
         """
         if hyperedge_index.size(1) < 1:
-            return cls(edges=[])
+            return cls(hyperedges=[])
 
-        unique_edge_ids = hyperedge_index[1].unique()
-        edges = [
-            hyperedge_index[0, hyperedge_index[1] == edge_id].tolist()
-            for edge_id in unique_edge_ids
+        unique_hyperedge_ids = hyperedge_index[1].unique()
+        hyperedges = [
+            hyperedge_index[0, hyperedge_index[1] == hyperedge_id].tolist()
+            for hyperedge_id in unique_hyperedge_ids
         ]
 
-        return cls(edges=edges)
+        return cls(hyperedges=hyperedges)
 
 
 class HyperedgeIndex:
@@ -168,9 +168,9 @@ class HyperedgeIndex:
     Each column in the tensor represents an incidence between a node and a hyperedge, with the first row containing node indices
     and the second row containing corresponding hyperedge indices.
 
-    Example:
-        hyperedge_index = [[0, 1, 2, 0],
-                           [0, 0, 0, 1]]
+    Examples:
+        >>> hyperedge_index = [[0, 1, 2, 0],
+        ...                    [0, 0, 0, 1]]
 
         This represents two hyperedges:
             - Hyperedge 0 connects nodes 0, 1, and 2.
@@ -216,22 +216,25 @@ class HyperedgeIndex:
         with_mediators: bool = False,
         remove_selfloops: bool = True,
     ) -> Tensor:
-        r"""
-        Construct a graph from a hypergraph with methods proposed in `HyperGCN: A New Method of Training Graph Convolutional Networks on Hypergraphs <https://arxiv.org/pdf/1809.02589.pdf>`_ paper
+        """
+        Construct a graph from a hypergraph with methods proposed in `HyperGCN: A New Method of Training Graph Convolutional Networks on Hypergraphs <https://arxiv.org/pdf/1809.02589.pdf>`_ paper.
         Reference implementation: `source <https://deephypergraph.readthedocs.io/en/latest/_modules/dhg/structure/graphs/graph.html#Graph.from_hypergraph_hypergcn>`_.
 
         Args:
             x: Node feature matrix. Size ``(|V|, C)``.
-            with_mediator: Whether to use mediator to transform the hyperedges to edges in the graph. Defaults to ``False``.
+            with_mediators: Whether to use mediator to transform the hyperedges to edges in the graph. Defaults to ``False``.
             remove_selfloops: Whether to remove self-loops. Defaults to ``True``.
 
         Returns:
             The edge index. Size ``(2, |E'|)``.
+
+        Raises:
+            ValueError: If any hyperedge contains fewer than 2 nodes.
         """
         device = x.device
 
         hypergraph = Hypergraph.from_hyperedge_index(self.__hyperedge_index)
-        hypergraph_edges: List[List[int]] = hypergraph.edges
+        hypergraph_edges: List[List[int]] = hypergraph.hyperedges
         graph_edges: List[List[int]] = []
 
         # Random direction (feature_dim, 1) for projecting nodes in each hyperedge
@@ -275,6 +278,13 @@ class HyperedgeIndex:
     ) -> "HyperedgeIndex":
         """
         Convert hyperedge index to the 0-based format by rebasing node IDs to the range ``[0, num_nodes-1]`` and hyperedge IDs ``[0, num_hyperedges-1]``.
+
+        Args:
+            node_ids_to_rebase: Tensor of shape ``(num_nodes,)`` containing the original node IDs that need to be rebased to 0-based format.
+            hyperedge_ids_to_rebase: Tensor of shape ``(num_hyperedges,)`` containing the original hyperedge IDs that need to be rebased to 0-based format.
+
+        Returns:
+            A new :class:`HyperedgeIndex` instance with the hyperedge index converted to 0-based format.
         """
         node_ids = self.__hyperedge_index[0]
         hyperedge_ids = self.__hyperedge_index[1]

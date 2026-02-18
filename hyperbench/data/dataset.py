@@ -44,10 +44,7 @@ class DatasetNames(Enum):
 
 
 class HIFConverter:
-    """
-    Docstring for HIFConverter
-    A utility class to load hypergraphs from HIF format.
-    """
+    """A utility class to load hypergraphs from HIF format."""
 
     @staticmethod
     def load_from_hif(dataset_name: Optional[str], save_on_disk: bool = False) -> HIFHypergraph:
@@ -130,15 +127,15 @@ class Dataset(TorchDataset):
         new_y = self.hdata.y[sampled_hyperedge_ids]
 
         new_edge_attr = None
-        if self.hdata.edge_attr is not None and len(sampled_hyperedge_ids) > 0:
-            new_edge_attr = self.hdata.edge_attr[sampled_hyperedge_ids]
+        if self.hdata.hyperedge_attr is not None and len(sampled_hyperedge_ids) > 0:
+            new_edge_attr = self.hdata.hyperedge_attr[sampled_hyperedge_ids]
 
         return HData(
             x=new_x,
-            edge_index=new_hyperedge_index,
-            edge_attr=new_edge_attr,
+            hyperedge_index=new_hyperedge_index,
+            hyperedge_attr=new_edge_attr,
             num_nodes=len(sampled_node_ids),
-            num_edges=len(sampled_hyperedge_ids),
+            num_hyperedges=len(sampled_hyperedge_ids),
             y=new_y,
         )
 
@@ -151,7 +148,7 @@ class Dataset(TorchDataset):
             hdata: :class:`HData` object containing the hypergraph data.
 
         Returns:
-            :class:`Dataset` instance with the provided :class:`HData`.
+            The :class:`Dataset` instance with the provided :class:`HData`.
         """
         return cls(hdata=hdata, is_original=False)
 
@@ -169,10 +166,10 @@ class Dataset(TorchDataset):
 
     def process(self) -> HData:
         """
-        Process the loaded hypergraph into HData format, mapping HIF structure to tensors.
+        Process the loaded hypergraph into :class:`HData` format, mapping HIF structure to tensors.
 
         Returns:
-            HData: Processed hypergraph data.
+            The processed hypergraph data.
         """
         if not self.__is_original:
             raise ValueError("process can only be called for the original dataset.")
@@ -229,17 +226,20 @@ class Dataset(TorchDataset):
         Boundaries are computed using cumulative floor to prevent early splits from
         over-consuming edges. The last split absorbs any rounding remainder.
 
-        Example:
+        Examples:
             With ``num_hyperedges = 3`` and ``ratios = [0.5, 0.25, 0.25]``:
+
             >>> cumulative_ratios = [0.5, 0.75, 1.0]
-            >>> boundaries:
-            >>>     i=0 -> end = int(0.5 * 3)  = 1 -> slice [0:1] -> 1 edge
-            >>>     i=1 -> end = int(0.75 * 3) = 2 -> slice [1:2] -> 1 edge
-            >>>     i=2 -> end = 3 (clamped)       -> slice [2:3] -> 1 edge
+
+            Boundaries:
+
+            - ``i=0`` -> ``end = int(0.5 * 3) = 1`` -> slice ``[0:1]`` -> 1 edge
+            - ``i=1`` -> ``end = int(0.75 * 3) = 2`` -> slice ``[1:2]`` -> 1 edge
+            - ``i=2`` -> ``end = 3`` (clamped) -> slice ``[2:3]`` -> 1 edge
 
         Args:
             ratios: List of floats summing to 1.0, e.g. [0.8, 0.1, 0.1].
-            shuffle: Whether to shuffle hyperedges before splitting. Default is ``False`` for deterministic splits.
+            shuffle: Whether to shuffle hyperedges before splitting. Defaults to ``False`` for deterministic splits.
             seed: Optional random seed for reproducibility. Ignored if shuffle is set to ``False``.
 
         Returns:
@@ -253,7 +253,7 @@ class Dataset(TorchDataset):
             raise ValueError(f"Split ratios must sum to 1.0, got {sum(ratios)}.")
 
         device = self.hdata.device
-        num_hyperedges = self.hdata.num_edges
+        num_hyperedges = self.hdata.num_hyperedges
         hyperedge_ids_permutation = self.__get_hyperedge_ids_permutation(
             num_hyperedges, shuffle, seed
         )
@@ -327,7 +327,7 @@ class Dataset(TorchDataset):
         attrs: Dict[str, Any],
         attr_keys: Optional[List[str]] = None,
     ) -> Tensor:
-        r"""
+        """
         Extract and encode numeric attributes to tensor.
         Non-numeric attributes are discarded. Missing attributes are filled with ``0.0``.
 
@@ -359,7 +359,7 @@ class Dataset(TorchDataset):
         Collect unique numeric attribute keys from a list of attribute dictionaries.
 
         Args:
-            attrs_list: List of attribute dictionaries.
+            attr_keys: List of attribute dictionaries.
 
         Returns:
             List of unique numeric attribute keys.
@@ -512,7 +512,7 @@ class Dataset(TorchDataset):
         self,
         sampled_node_ids_list: List[int],
     ) -> Tuple[Tensor, Tensor, Tensor]:
-        hyperedge_index = self.hdata.edge_index
+        hyperedge_index = self.hdata.hyperedge_index
         node_ids = hyperedge_index[0]
         hyperedge_ids = hyperedge_index[1]
 
