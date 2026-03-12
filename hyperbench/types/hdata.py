@@ -1,7 +1,7 @@
 import torch
 
 from torch import Tensor
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Dict, Any
 from hyperbench.utils import empty_hyperedgeindex, empty_nodefeatures
 
 from .hypergraph import HyperedgeIndex
@@ -379,3 +379,92 @@ class HData:
     def with_y_zeros(self) -> "HData":
         """Return a copy of this instance with a y attribute of all zeros."""
         return self.with_y_to(0.0)
+
+    def stats(self) -> Dict[str, Any]:
+        """
+        Compute statistics for the hypergraph data.
+        The field returned in the dictionary include:
+        - ``shape_x``: The shape of the node feature matrix ``x``.
+        - ``shape_hyperedge_attr``: The shape of the hyperedge attribute matrix, or ``None`` if hyperedge attributes are not present.
+        - ``num_nodes``: The number of nodes in the hypergraph.
+        - ``num_hyperedges``: The number of hyperedges in the hypergraph.
+        - ``avg_degree_node``: The average degree of nodes, calculated as the mean number of hyperedges each node belongs to.
+        - ``avg_degree_hyperedge``: The average size of hyperedges, calculated as the mean number of nodes each hyperedge contains.
+        - ``node_degree_max``: The maximum degree of any node in the hypergraph.
+        - ``hyperedge_degree_max``: The maximum size of any hyperedge in the hypergraph.
+        - ``node_degree_median``: The median degree of nodes in the hypergraph.
+        - ``hyperedge_degree_median``: The median size of hyperedges in the hypergraph.
+        - ``distribution_node_degree``: A list where the value at index ``i`` represents the count of nodes with degree ``i``.
+        - ``distribution_hyperedge_size``: A list where the value at index ``i`` represents the count of hyperedges with size ``i``.
+        - ``distribution_node_degree_hist``: A dictionary where the keys are node degrees and the values are the count of nodes with that degree.
+        - ``distribution_hyperedge_size_hist``: A dictionary where the keys are hyperedge sizes and the values are the count of hyperedges with that size.
+
+        Returns:
+            A dictionary containing various statistics about the hypergraph.
+        """
+
+        node_ids = self.hyperedge_index[0]
+        hyperedge_ids = self.hyperedge_index[1]
+
+        # Degree of each node = number of hyperedges it belongs to
+        # Size of each hyperedge = number of nodes it contains
+        if node_ids.numel() > 0:
+            distribution_node_degree = torch.bincount(node_ids, minlength=self.num_nodes).float()
+            distribution_hyperedge_size = torch.bincount(
+                hyperedge_ids, minlength=self.num_hyperedges
+            ).float()
+        else:
+            distribution_node_degree = torch.zeros(self.num_nodes, dtype=torch.float)
+            distribution_hyperedge_size = torch.zeros(self.num_hyperedges, dtype=torch.float)
+
+        num_nodes = self.num_nodes
+        num_hyperedges = self.num_hyperedges
+
+        if distribution_node_degree.numel() > 0:
+            avg_degree_node = distribution_node_degree.mean().item()
+            avg_degree_hyperedge = distribution_hyperedge_size.mean().item()
+            node_degree_max = int(distribution_node_degree.max().item())
+            hyperedge_degree_max = int(distribution_hyperedge_size.max().item())
+            node_degree_median = int(distribution_node_degree.median().item())
+            hyperedge_degree_median = int(distribution_hyperedge_size.median().item())
+        else:
+            avg_degree_node = 0
+            avg_degree_hyperedge = 0
+            node_degree_max = 0
+            hyperedge_degree_max = 0
+            node_degree_median = 0
+            hyperedge_degree_median = 0
+
+        # Histograms: index i holds count of nodes/hyperedges with degree/size i
+        distribution_node_degree_hist = torch.bincount(distribution_node_degree.long())
+        distribution_hyperedge_size_hist = torch.bincount(distribution_hyperedge_size.long())
+
+        distribution_node_degree_hist = {
+            i: int(count.item())
+            for i, count in enumerate(distribution_node_degree_hist)
+            if count.item() > 0
+        }
+        distribution_hyperedge_size_hist = {
+            i: int(count.item())
+            for i, count in enumerate(distribution_hyperedge_size_hist)
+            if count.item() > 0
+        }
+
+        return {
+            "shape_x": self.x.shape,
+            "shape_hyperedge_attr": self.hyperedge_attr.shape
+            if self.hyperedge_attr is not None
+            else None,
+            "num_nodes": num_nodes,
+            "num_hyperedges": num_hyperedges,
+            "avg_degree_node": avg_degree_node,
+            "avg_degree_hyperedge": avg_degree_hyperedge,
+            "node_degree_max": node_degree_max,
+            "hyperedge_degree_max": hyperedge_degree_max,
+            "node_degree_median": node_degree_median,
+            "hyperedge_degree_median": hyperedge_degree_median,
+            "distribution_node_degree": distribution_node_degree.int().tolist(),
+            "distribution_hyperedge_size": distribution_hyperedge_size.int().tolist(),
+            "distribution_node_degree_hist": distribution_node_degree_hist,
+            "distribution_hyperedge_size_hist": distribution_hyperedge_size_hist,
+        }

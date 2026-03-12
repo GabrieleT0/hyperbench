@@ -469,3 +469,11 @@ class Dataset(TorchDataset):
             x = torch.ones((num_nodes, 1), dtype=torch.float)
 
         return x  # shape [num_nodes, num_node_features]
+
+    def stats(self) -> Dict[str, Any]:
+        """
+        Compute statistics for the dataset.
+        This method currently delegates to the underlying HData's stats method.
+        """
+
+        return self.hdata.stats()
