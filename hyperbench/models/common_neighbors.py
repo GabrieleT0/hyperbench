@@ -1,15 +1,15 @@
 import torch
 
 from torch import Tensor, nn
-from typing import Dict, Optional
-from hyperbench.nn import Aggregation, CommonNeighborsScorer, NeighborScorer
-from hyperbench.types.hypergraph import Neighborhood
+from typing import Dict, Literal, Optional
+from hyperbench.nn import CommonNeighborsScorer, NeighborScorer
+from hyperbench.types import Neighborhood
 
 
 class CommonNeighbors(nn.Module):
     def __init__(
         self,
-        aggregation: Optional[Aggregation] = None,
+        aggregation: Literal["mean", "min", "sum"],
         scorer: Optional[NeighborScorer] = None,
     ) -> None:
         super().__init__()
