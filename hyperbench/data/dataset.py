@@ -4,16 +4,19 @@ import tempfile
 import torch
 import zstandard as zstd
 import requests
+from huggingface_hub import hf_hub_download
+import warnings
 
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from torch import Tensor
 from torch.utils.data import Dataset as TorchDataset
+
 from hyperbench.nn import EnrichmentMode, NodeFeatureEnricher
 from hyperbench.types import HData, HIFHypergraph
 from hyperbench.utils import validate_hif_json
 
-from .sampling import SamplingStrategy, create_sampler_from_strategy
+from hyperbench.data.sampling import SamplingStrategy, create_sampler_from_strategy
 
 
 class DatasetNames(Enum):
@@ -65,9 +68,34 @@ class HIFConverter:
 
             response = requests.get(github_dataset_repo)
             if response.status_code != 200:
-                raise ValueError(
-                    f"Failed to download dataset '{dataset_name}' from GitHub. Status code: {response.status_code}"
+                warnings.warn(
+                    f"GitHub raw download failed for dataset '{dataset_name}' with status code {response.status_code}"
+                    "Falling back to Hugging Face Hub download for dataset",
+                    category=UserWarning,
+                    stacklevel=2,
                 )
+
+                REPO_ID = f"HypernetworkRG/{dataset_name}"
+                FILENAME = f"{dataset_name}.json.zst"
+
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", suffix=".json.zst", delete=False
+                ) as tmp_hf_file:
+                    try:
+                        downloaded_path = hf_hub_download(
+                            repo_id=REPO_ID,
+                            filename=FILENAME,
+                            repo_type="dataset",
+                        )
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed to download dataset '{dataset_name}' from GitHub and Hugging Face Hub. GitHub error: {response.status_code} | Hugging Face error: {str(e)}"
+                        )
+                    with open(downloaded_path, "rb") as hf_file:
+                        hf_content = hf_file.read()
+                    tmp_hf_file.write(hf_content)
+
+                response._content = hf_content
 
             if save_on_disk:
                 os.makedirs(os.path.join(current_dir, "datasets"), exist_ok=True)
