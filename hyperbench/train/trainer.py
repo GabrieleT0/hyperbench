@@ -5,7 +5,7 @@ import warnings
 import lightning as L
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, TypedDict
 from collections.abc import Iterable
 from lightning.pytorch.accelerators import Accelerator
 from lightning.pytorch.callbacks import Callback
@@ -15,6 +15,7 @@ from lightning.pytorch.strategies import Strategy
 from hyperbench.data import DataLoader
 from hyperbench.train.markdown_logger import MarkdownTableLogger
 from hyperbench.types import CkptStrategy, ModelConfig, TestResult
+from hyperbench.train.latex_logger import LaTexTableLogger
 
 
 class MultiModelTrainer:
@@ -410,6 +411,16 @@ class MultiModelTrainer:
                 save_dir=self.log_dir,
                 name=model_config.name,
                 version=f"{MultiModelTrainer.VERSION_NAME_PREFIX}_{model_config.version}",
+            ),
+            LaTexTableLogger(
+                save_dir=self.log_dir,
+                model_name=model_config.full_model_name(),
+                experiment_name=experiment_name,
+                options={
+                    "table_caption": f"Results for Experiments",
+                    "sort_by": ["des", "asc"],
+                    "border": False,
+                },
             ),
             MarkdownTableLogger(
                 save_dir=self.log_dir,
