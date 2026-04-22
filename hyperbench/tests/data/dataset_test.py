@@ -5,7 +5,7 @@ import torch
 
 from unittest.mock import patch, mock_open, MagicMock
 from hyperbench.data import AlgebraDataset, Dataset, HIFConverter, SamplingStrategy
-from hyperbench.nn import EnrichmentMode, NodeFeatureEnricher
+from hyperbench.nn import EnrichmentMode, NodeEnricher, HyperedgeEnricher
 from hyperbench.types import HData, HIFHypergraph
 
 
@@ -17,11 +17,27 @@ def mock_hdata() -> HData:
 
 
 @pytest.fixture
+def mock_hdata_with_hyperedge_attr() -> HData:
+    x = torch.ones((3, 1), dtype=torch.float)
+    hyperedge_index = torch.tensor([[0, 1, 2], [0, 0, 1]], dtype=torch.long)
+    hyperedge_attr = torch.ones((3, 1), dtype=torch.float)
+    return HData(x=x, hyperedge_index=hyperedge_index, hyperedge_attr=hyperedge_attr)
+
+
+@pytest.fixture
+def mock_hdata_with_hyperedge_weights() -> HData:
+    x = torch.ones((3, 1), dtype=torch.float)
+    hyperedge_index = torch.tensor([[0, 1, 2], [0, 0, 1]], dtype=torch.long)
+    hyperedge_weights = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float)
+    return HData(x=x, hyperedge_index=hyperedge_index, hyperedge_weights=hyperedge_weights)
+
+
+@pytest.fixture
 def mock_sample_hypergraph():
     return HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0"}, {"node": "1"}],
-        edges=[{"edge": "0"}],
+        hyperedges=[{"edge": "0"}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -31,7 +47,7 @@ def mock_simple_hypergraph():
     return HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0", "attrs": {}}, {"node": "1", "attrs": {}}],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -45,7 +61,7 @@ def mock_three_node_weighted_hypergraph():
             {"node": "1", "attrs": {}},
             {"node": "2", "attrs": {}},
         ],
-        edges=[
+        hyperedges=[
             {"edge": "0", "attrs": {"weight": 1.0}},
             {"edge": "1", "attrs": {"weight": 2.0}},
         ],
@@ -67,7 +83,7 @@ def mock_four_node_hypergraph():
             {"node": "2", "attrs": {}},
             {"node": "3", "attrs": {}},
         ],
-        edges=[{"edge": "0", "attrs": {}}, {"edge": "1", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}, {"edge": "1", "attrs": {}}],
         incidences=[
             {"node": "0", "edge": "0"},
             {"node": "1", "edge": "0"},
@@ -88,7 +104,7 @@ def mock_five_node_hypergraph():
             {"node": "3", "attrs": {}},
             {"node": "4", "attrs": {}},
         ],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -101,7 +117,7 @@ def mock_no_edge_attr_hypergraph():
             {"node": "0", "attrs": {}},
             {"node": "1", "attrs": {}},
         ],
-        edges=[{"edge": "0"}],
+        hyperedges=[{"edge": "0"}],
         incidences=[
             {"node": "0", "edge": "0"},
             {"node": "1", "edge": "0"},
@@ -119,7 +135,7 @@ def mock_multiple_edges_attr_hypergraph():
             {"node": "2", "attrs": {}},
             {"node": "3", "attrs": {}},
         ],
-        edges=[
+        hyperedges=[
             {"edge": "0", "attrs": {"weight": 1.0}},
             {"edge": "1", "attrs": {"weight": 2.0}},
             {"edge": "2", "attrs": {"weight": 3.0}},
@@ -138,7 +154,7 @@ def test_HIFConverter_num_nodes_and_edges():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": str(i)} for i in range(20)],
-        edges=[{"edge": str(i)} for i in range(30)],
+        hyperedges=[{"edge": str(i)} for i in range(30)],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -147,13 +163,13 @@ def test_HIFConverter_num_nodes_and_edges():
 
     assert hypergraph is not None
     assert hasattr(hypergraph, "nodes")
-    assert hasattr(hypergraph, "edges")
+    assert hasattr(hypergraph, "hyperedges")
     assert hasattr(hypergraph, "incidences")
     assert hasattr(hypergraph, "metadata")
     assert hasattr(hypergraph, "network_type")
 
     assert hypergraph.num_nodes == 20
-    assert hypergraph.num_edges == 30
+    assert hypergraph.num_hyperedges == 30
 
 
 def test_HIFConverter_loads_invalid_dataset():
@@ -188,7 +204,7 @@ def test_HIFConverter_stores_on_disk_when_save_on_disk_true():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0"}, {"node": "1"}],
-        edges=[{"edge": "0"}],
+        hyperedges=[{"edge": "0"}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -234,7 +250,7 @@ def test_HIFConverter_uses_temp_file_when_save_on_disk_false():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0"}, {"node": "1"}],
-        edges=[{"edge": "0"}],
+        hyperedges=[{"edge": "0"}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -436,7 +452,7 @@ def test_dataset_process_no_incidences():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0", "attrs": {}}, {"node": "1", "attrs": {}}],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[],
     )
 
@@ -461,7 +477,7 @@ def test_dataset_process_with_edge_attributes():
             {"node": "1", "attrs": {}},
             {"node": "2", "attrs": {}},
         ],
-        edges=[
+        hyperedges=[
             {"edge": "0", "attrs": {"weight": 1.0, "type": 2.0}},
             {"edge": "1", "attrs": {"weight": 3.0, "type": 0.1}},
         ],
@@ -515,7 +531,7 @@ def test_dataset_process_random_ids():
             {"node": "ss", "attrs": {}},
             {"node": "fewao", "attrs": {}},
         ],
-        edges=[{"edge": "0", "attrs": {}}, {"edge": "1", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}, {"edge": "1", "attrs": {}}],
         incidences=[
             {"node": "abc", "edge": "0"},
             {"node": "ss", "edge": "0"},
@@ -708,7 +724,7 @@ def test_getitem_hyperedge_attr_are_padded_with_zero_when_no_uniform_edges():
             {"node": "2", "attrs": {}},
             {"node": "3", "attrs": {}},
         ],
-        edges=[
+        hyperedges=[
             {"edge": "0", "attrs": {"weight": 1.0, "abc": 5.0}},
             {"edge": "1", "attrs": {"weight": 2.0}},  # Missing 'abc'
             {"edge": "2", "attrs": {"abc": 3.0}},  # Missing 'weight'
@@ -740,11 +756,69 @@ def test_getitem_hyperedge_attr_are_padded_with_zero_when_no_uniform_edges():
     )  # weight=0.0, abc=3.0
 
 
+def test_process_not_all_hyperedge_weights_():
+    mock_hypergraph = HIFHypergraph(
+        network_type="undirected",
+        nodes=[
+            {"node": "0", "attrs": {}},
+            {"node": "1", "attrs": {}},
+            {"node": "2", "attrs": {}},
+        ],
+        hyperedges=[
+            {"edge": "0", "weight": 1.5},
+            {"edge": "1"},
+            {"edge": "2", "weight": 2.5},
+        ],
+        incidences=[
+            {"node": "0", "edge": "0"},
+            {"node": "1", "edge": "1"},
+            {"node": "2", "edge": "2"},
+        ],
+    )
+
+    with patch.object(HIFConverter, "load_from_hif", return_value=mock_hypergraph):
+        with pytest.raises(
+            ValueError,
+            match="Some hyperedges have weights while others do not. All hyperedges must either have weights or none.",
+        ):
+            dataset = AlgebraDataset()
+
+
+def test_process_extracts_top_level_hyperedge_weights():
+    mock_hypergraph = HIFHypergraph(
+        network_type="undirected",
+        nodes=[
+            {"node": "0", "attrs": {}},
+            {"node": "1", "attrs": {}},
+            {"node": "2", "attrs": {}},
+        ],
+        hyperedges=[
+            {"edge": "0", "weight": 1.5},
+            {"edge": "1", "weight": 3.0},
+            {"edge": "2", "weight": 2.5},
+        ],
+        incidences=[
+            {"node": "0", "edge": "0"},
+            {"node": "1", "edge": "1"},
+            {"node": "2", "edge": "2"},
+        ],
+    )
+
+    with patch.object(HIFConverter, "load_from_hif", return_value=mock_hypergraph):
+        dataset = AlgebraDataset()
+
+    hyperedge_weights = dataset.hdata.hyperedge_weights
+    assert hyperedge_weights is not None
+    assert torch.allclose(hyperedge_weights[0], torch.tensor([1.5]))
+    assert torch.allclose(hyperedge_weights[1], torch.tensor([3.0]))
+    assert torch.allclose(hyperedge_weights[2], torch.tensor([2.5]))
+
+
 def test_transform_attrs_empty_attrs():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0", "attrs": {}}],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -771,7 +845,7 @@ def test_process_adds_padding_zero_when_inconsistent_node_attributes():
             {"node": "1", "attrs": {"weight": 2.0, "score": 0.8}},
             {"node": "2", "attrs": {"score": 0.5}},  # Missing 'weight'
         ],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[
             {"node": "0", "edge": "0"},
             {"node": "1", "edge": "0"},
@@ -802,7 +876,7 @@ def test_process_with_no_node_attributes_fallback_to_one():
             {"node": "0", "attrs": {"name": "node0"}},
             {"node": "1", "attrs": {}},
         ],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[{"node": "0", "edge": "0"}, {"node": "1", "edge": "0"}],
     )
 
@@ -825,7 +899,7 @@ def test_process_with_single_node_attribute():
             {"node": "1", "attrs": {"weight": 2.5}},
             {"node": "2", "attrs": {"weight": 3.5}},
         ],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[
             {"node": "0", "edge": "0"},
             {"node": "1", "edge": "0"},
@@ -849,7 +923,7 @@ def test_transform_attrs_adds_padding_zero_when_attr_keys_padding():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0", "attrs": {}}],
-        edges=[{"edge": "0", "attrs": {}}],
+        hyperedges=[{"edge": "0", "attrs": {}}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -912,7 +986,7 @@ def test_from_hdata_process_raises(mock_hdata):
 def test_enrich_node_features_replace(mock_hdata):
     dataset = Dataset.from_hdata(mock_hdata)
 
-    enricher = MagicMock(spec=NodeFeatureEnricher)
+    enricher = MagicMock(spec=NodeEnricher)
     enriched_x = torch.randn(3, 4)
     enricher.enrich.return_value = enriched_x
 
@@ -926,7 +1000,7 @@ def test_enrich_node_features_concatenate(mock_hdata):
     dataset = Dataset.from_hdata(mock_hdata)
     original_x = dataset.hdata.x.clone()
 
-    enricher = MagicMock(spec=NodeFeatureEnricher)
+    enricher = MagicMock(spec=NodeEnricher)
     enriched_x = torch.randn(3, 4)
     enricher.enrich.return_value = enriched_x
 
@@ -936,6 +1010,76 @@ def test_enrich_node_features_concatenate(mock_hdata):
     expected_x = torch.cat([original_x, enriched_x], dim=1)
     assert torch.equal(dataset.hdata.x, expected_x)
     assert dataset.hdata.x.shape == (3, 5)  # 1 original + 4 enriched
+
+
+def test_enrich_hyperedge_attr_replace(mock_hdata):
+    dataset = Dataset.from_hdata(mock_hdata)
+
+    enricher = MagicMock(spec=HyperedgeEnricher)
+    enriched_x = torch.randn(3, 4)
+    enricher.enrich.return_value = enriched_x
+
+    dataset.enrich_hyperedge_attr(enricher)
+
+    enricher.enrich.assert_called_once_with(mock_hdata.hyperedge_index)
+    hyperedge_attr = dataset.hdata.hyperedge_attr
+    assert hyperedge_attr is not None
+    assert torch.equal(hyperedge_attr, enriched_x)
+
+
+def test_enrich_hyperedge_attr_concatenate(mock_hdata_with_hyperedge_attr):
+    dataset = Dataset.from_hdata(mock_hdata_with_hyperedge_attr)
+    original_hyperedge_attr = dataset.hdata.hyperedge_attr
+    assert original_hyperedge_attr is not None
+    original_hyperedge_attr = original_hyperedge_attr.clone()
+
+    enricher = MagicMock(spec=HyperedgeEnricher)
+    enriched_x = torch.randn(3, 4)
+    enricher.enrich.return_value = enriched_x
+
+    dataset.enrich_hyperedge_attr(enricher, enrichment_mode="concatenate")
+
+    enricher.enrich.assert_called_once_with(mock_hdata_with_hyperedge_attr.hyperedge_index)
+    expected_x = torch.cat([original_hyperedge_attr, enriched_x], dim=1)
+    hyperedge_attr = dataset.hdata.hyperedge_attr
+    assert hyperedge_attr is not None
+    assert torch.equal(hyperedge_attr, expected_x)
+    assert hyperedge_attr.shape == (3, 5)  # 1 original + 4 enriched
+
+
+def test_enrich_hyperedge_weights_replace(mock_hdata):
+    dataset = Dataset.from_hdata(mock_hdata)
+
+    enricher = MagicMock(spec=HyperedgeEnricher)
+    enriched_weights = torch.randn(3)
+    enricher.enrich.return_value = enriched_weights
+
+    dataset.enrich_hyperedge_weights(enricher)
+
+    enricher.enrich.assert_called_once_with(mock_hdata.hyperedge_index)
+    hyperedge_weights = dataset.hdata.hyperedge_weights
+    assert hyperedge_weights is not None
+    assert torch.equal(hyperedge_weights, enriched_weights)
+
+
+def test_enrich_hyperedge_weights_concatenate(mock_hdata_with_hyperedge_weights):
+    dataset = Dataset.from_hdata(mock_hdata_with_hyperedge_weights)
+    original_weights = dataset.hdata.hyperedge_weights
+    assert original_weights is not None
+    original_weights = original_weights.clone()
+
+    enricher = MagicMock(spec=HyperedgeEnricher)
+    enriched_weights = torch.randn(3)
+    enricher.enrich.return_value = enriched_weights
+
+    dataset.enrich_hyperedge_weights(enricher, enrichment_mode="concatenate")
+
+    enricher.enrich.assert_called_once_with(mock_hdata_with_hyperedge_weights.hyperedge_index)
+    expected_weights = torch.cat([original_weights, enriched_weights], dim=0)
+    hyperedge_weights = dataset.hdata.hyperedge_weights
+    assert hyperedge_weights is not None
+    assert torch.equal(hyperedge_weights, expected_weights)
+    assert hyperedge_weights.shape == (6,)  # 3 original + 3 enriched
 
 
 @pytest.mark.parametrize(
@@ -1110,7 +1254,7 @@ def test_load_from_hif_skips_download_when_file_exists():
     mock_hypergraph = HIFHypergraph(
         network_type="undirected",
         nodes=[{"node": "0"}, {"node": "1"}],
-        edges=[{"edge": "0"}],
+        hyperedges=[{"edge": "0"}],
         incidences=[{"node": "0", "edge": "0"}],
     )
 
@@ -1255,6 +1399,7 @@ def test_dataset_stats_computation(mock_hdata_stats):
     expected_stats = {
         "shape_x": torch.Size([4, 4]),
         "shape_hyperedge_attr": None,
+        "shape_hyperedge_weights": None,
         "num_nodes": 4,
         "num_hyperedges": 2,
         "avg_degree_node_raw": 1.25,

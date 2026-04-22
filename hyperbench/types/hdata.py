@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 from typing import Optional, Sequence, Dict, Any
 from hyperbench.utils import empty_hyperedgeindex, empty_nodefeatures
-from hyperbench.nn.enricher import EnrichmentMode, NodeFeatureEnricher
+from hyperbench.nn.enricher import EnrichmentMode, NodeEnricher, HyperedgeEnricher
 
 from hyperbench.types.hypergraph import HyperedgeIndex
 
@@ -16,12 +16,13 @@ class HData:
         >>> x = torch.randn(10, 16)  # 10 nodes with 16 features each
         >>> hyperedge_index = torch.tensor([[0, 0, 1, 1, 1],  # node IDs
         ...                                 [0, 1, 2, 3, 4]]) # hyperedge IDs
-        >>> data = HData(x, hyperedge_index=hyperedge_index)
+        >>> data = HData(x=x, hyperedge_index=hyperedge_index)
 
     Args:
         x: Node feature matrix of shape ``[num_nodes, num_features]``.
         hyperedge_index: Hyperedge connectivity in COO format of shape ``[2, num_incidences]``,
             where ``hyperedge_index[0]`` contains node IDs and ``hyperedge_index[1]`` contains hyperedge IDs.
+        hyperedge_weights: Optional tensor of shape ``[num_hyperedges]`` containing weights for each hyperedge.
         hyperedge_attr: Hyperedge feature matrix of shape ``[num_hyperedges, num_hyperedge_features]``.
             Features associated with each hyperedge (e.g., weights, timestamps, types).
         num_nodes: Number of nodes in the hypergraph.
@@ -37,6 +38,7 @@ class HData:
         self,
         x: Tensor,
         hyperedge_index: Tensor,
+        hyperedge_weights: Optional[Tensor] = None,
         hyperedge_attr: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
         num_hyperedges: Optional[int] = None,
@@ -45,6 +47,8 @@ class HData:
         self.x: Tensor = x
 
         self.hyperedge_index: Tensor = hyperedge_index
+
+        self.hyperedge_weights: Optional[Tensor] = hyperedge_weights
 
         self.hyperedge_attr: Optional[Tensor] = hyperedge_attr
 
@@ -77,6 +81,7 @@ class HData:
             f"    num_hyperedges={self.num_hyperedges},\n"
             f"    x_shape={self.x.shape},\n"
             f"    hyperedge_index_shape={self.hyperedge_index.shape},\n"
+            f"    hyperedge_weights_shape={self.hyperedge_weights.shape if self.hyperedge_weights is not None else None},\n"
             f"    hyperedge_attr_shape={self.hyperedge_attr.shape if self.hyperedge_attr is not None else None},\n"
             f"    y_shape={self.y.shape if self.y is not None else None}\n"
             f"    device={self.device}\n"
@@ -92,13 +97,14 @@ class HData:
         Notes:
             - ``x`` is derived from the instance with the largest number of nodes, if not provided explicitly. If there are conflicting features for the same node ID across instances, the features from the instance with the largest number of nodes will be used.
             - ``hyperedge_index`` is the concatenation of all input hyperedge indices.
+            - ``hyperedge_weights`` is the concatenation of all input hyperedge weights, if present. If some instances have hyperedge weights and others do not, the resulting ``hyperedge_weights`` will be set to ``None``.
             - ``hyperedge_attr`` is the concatenation of all input hyperedge attributes, if present. If some instances have hyperedge attributes and others do not, the resulting ``hyperedge_attr`` will be set to ``None``.
             - ``y`` is the concatenation of all input labels.
 
         Examples:
             >>> x = torch.randn(5, 8)
-            >>> pos = HData(x, torch.tensor([[0, 1, 2, 3, 4], [0, 0, 1, 2, 2]]))
-            >>> neg = HData(x, torch.tensor([[0, 2], [3, 3]]))
+            >>> pos = HData(x=x, hyperedge_index=torch.tensor([[0, 1, 2, 3, 4], [0, 0, 1, 2, 2]]))
+            >>> neg = HData(x=x, hyperedge_index=torch.tensor([[0, 2], [3, 3]]))
             >>> new = HData.cat_same_node_space([pos, neg])
             >>> new.num_nodes  # 5 — nodes [0, 1, 2, 3, 4]
             >>> new.num_hyperedges  # 4 — hyperedges [0, 1, 2, 3]
@@ -129,15 +135,22 @@ class HData:
         new_hyperedge_index = torch.cat([hdata.hyperedge_index for hdata in hdatas], dim=1)
 
         hyperedge_attrs = []
+        hyperedge_weights = []
         have_all_hyperedge_attr = all(hdata.hyperedge_attr is not None for hdata in hdatas)
+        have_all_hyperedge_weights = all(hdata.hyperedge_weights is not None for hdata in hdatas)
         for hdata in hdatas:
             if have_all_hyperedge_attr and hdata.hyperedge_attr is not None:
                 hyperedge_attrs.append(hdata.hyperedge_attr)
+            if have_all_hyperedge_weights and hdata.hyperedge_weights is not None:
+                hyperedge_weights.append(hdata.hyperedge_weights)
         new_hyperedge_attr = torch.cat(hyperedge_attrs, dim=0) if len(hyperedge_attrs) > 0 else None
-
+        new_hyperedge_weights = (
+            torch.cat(hyperedge_weights, dim=0) if len(hyperedge_weights) > 0 else None
+        )
         return cls(
             x=new_x,
             hyperedge_index=new_hyperedge_index,
+            hyperedge_weights=new_hyperedge_weights,
             hyperedge_attr=new_hyperedge_attr,
             num_nodes=new_x.size(0),
             num_hyperedges=new_y.size(0),
@@ -149,6 +162,7 @@ class HData:
         return cls(
             x=empty_nodefeatures(),
             hyperedge_index=empty_hyperedgeindex(),
+            hyperedge_weights=None,
             hyperedge_attr=None,
             num_nodes=0,
             num_hyperedges=0,
@@ -162,6 +176,7 @@ class HData:
 
         - Node features are initialized as an empty tensor of shape ``[0, 0]``.
         - Hyperedge attributes are set to ``None``.
+        - Hyperedge weights are set to ``None``.
         - The number of nodes and hyperedges are inferred from the hyperedge index.
 
         Examples:
@@ -171,6 +186,7 @@ class HData:
             >>> num_hyperedges = 3
             >>> x = []  # Empty node features with shape [0, 0]
             >>> hyperedge_attr = None
+            >>> hyperedge_weights = None
 
         Args:
             hyperedge_index: Tensor of shape ``[2, num_incidences]`` representing the hypergraph connectivity.
@@ -181,6 +197,7 @@ class HData:
         return cls(
             x=empty_nodefeatures(),
             hyperedge_index=hyperedge_index,
+            hyperedge_weights=None,
             hyperedge_attr=None,
             y=None,
         )
@@ -198,6 +215,7 @@ class HData:
             ...                        [0, 0, 0, 1, 1]]  # hyperedges 0 -> 0, 2 -> 1 (remapped to 0-based)
             >>> new_x = [x[0], x[1], x[3], x[4]]
             >>> new_hyperedge_attr = [hyperedge_attr[0], hyperedge_attr[2]]
+            >>> new_hyperedge_weights = [hyperedge_weights[0], hyperedge_weights[2]]
 
         Args:
             hdata: The original :class:`HData` containing the full hypergraph.
@@ -238,9 +256,14 @@ class HData:
         if hdata.hyperedge_attr is not None:
             new_hyperedge_attr = hdata.hyperedge_attr[split_unique_hyperedge_ids]
 
+        new_hyperedge_weights = None
+        if hdata.hyperedge_weights is not None:
+            new_hyperedge_weights = hdata.hyperedge_weights[split_unique_hyperedge_ids]
+
         return cls(
             x=new_x,
             hyperedge_index=split_hyperedge_index_wrapper.item,
+            hyperedge_weights=new_hyperedge_weights,
             hyperedge_attr=new_hyperedge_attr,
             num_nodes=len(split_unique_node_ids),
             num_hyperedges=len(split_unique_hyperedge_ids),
@@ -249,14 +272,14 @@ class HData:
 
     def enrich_node_features(
         self,
-        enricher: NodeFeatureEnricher,
+        enricher: NodeEnricher,
         enrichment_mode: Optional[EnrichmentMode] = None,
     ) -> "HData":
         """
         Enrich node features using the provided node feature enricher.
 
         Args:
-            enricher: An instance of NodeFeatureEnricher to generate structural node features from hypergraph topology.
+            enricher: An instance of NodeEnricher to generate structural node features from hypergraph topology.
             enrichment_mode: How to combine generated features with existing ``hdata.x``.
                 ``concatenate`` appends new features as additional columns.
                 ``replace`` substitutes ``hdata.x`` entirely.
@@ -272,7 +295,78 @@ class HData:
         return self.__class__(
             x=x,
             hyperedge_index=self.hyperedge_index,
+            hyperedge_weights=self.hyperedge_weights,
             hyperedge_attr=self.hyperedge_attr,
+            num_nodes=self.num_nodes,
+            num_hyperedges=self.num_hyperedges,
+            y=self.y,
+        )
+
+    def enrich_hyperedge_weights(
+        self,
+        enricher: HyperedgeEnricher,
+        enrichment_mode: Optional[EnrichmentMode] = None,
+    ) -> "HData":
+        """Enrich hyperedge weights using the provided hyperedge weight enricher.
+        Args:
+            enricher: An instance of HyperedgeEnricher to generate hyperedge weights from hypergraph topology.
+            enrichment_mode: How to combine generated weights with existing ``hdata.hyperedge_weights``.
+                ``concatenate`` appends new weights to the existing 1D tensor.
+                ``replace`` substitutes ``hdata.hyperedge_weights`` entirely.
+        """
+        enriched_weights = enricher.enrich(self.hyperedge_index)
+
+        match enrichment_mode:
+            case "concatenate":
+                hyperedge_weights = (
+                    torch.cat([self.hyperedge_weights, enriched_weights], dim=0)
+                    if self.hyperedge_weights is not None
+                    else enriched_weights
+                )
+            case _:
+                hyperedge_weights = enriched_weights
+
+        return self.__class__(
+            x=self.x,
+            hyperedge_index=self.hyperedge_index,
+            hyperedge_weights=hyperedge_weights,
+            hyperedge_attr=self.hyperedge_attr,
+            num_nodes=self.num_nodes,
+            num_hyperedges=self.num_hyperedges,
+            y=self.y,
+        )
+
+    def enrich_hyperedge_attr(
+        self,
+        enricher: HyperedgeEnricher,
+        enrichment_mode: Optional[EnrichmentMode] = None,
+    ) -> "HData":
+        """
+        Enrich hyperedge features using the provided hyperedge feature enricher.
+
+        Args:
+            enricher: An instance of HyperedgeEnricher to generate structural hyperedge features from hypergraph topology.
+            enrichment_mode: How to combine generated features with existing ``hdata.hyperedge_attr``.
+                ``concatenate`` appends new features as additional columns.
+                ``replace`` substitutes ``hdata.hyperedge_attr`` entirely.
+        """
+        enriched_features = enricher.enrich(self.hyperedge_index)
+
+        match enrichment_mode:
+            case "concatenate":
+                hyperedge_attr = (
+                    torch.cat([self.hyperedge_attr, enriched_features], dim=1)
+                    if self.hyperedge_attr is not None
+                    else enriched_features
+                )
+            case _:
+                hyperedge_attr = enriched_features
+
+        return self.__class__(
+            x=self.x,
+            hyperedge_index=self.hyperedge_index,
+            hyperedge_weights=self.hyperedge_weights,
+            hyperedge_attr=hyperedge_attr,
             num_nodes=self.num_nodes,
             num_hyperedges=self.num_hyperedges,
             y=self.y,
@@ -292,6 +386,8 @@ class HData:
         devices = {self.x.device, self.hyperedge_index.device, self.y.device}
         if self.hyperedge_attr is not None:
             devices.add(self.hyperedge_attr.device)
+        if self.hyperedge_weights is not None:
+            devices.add(self.hyperedge_weights.device)
         if len(devices) > 1:
             raise ValueError(f"Inconsistent device placement: {devices}")
 
@@ -309,9 +405,14 @@ class HData:
         if self.hyperedge_attr is not None:
             hyperedge_attr = self.hyperedge_attr[hyperedge_index_wrapper.hyperedge_ids]
 
+        hyperedge_weights = None
+        if self.hyperedge_weights is not None:
+            hyperedge_weights = self.hyperedge_weights[hyperedge_index_wrapper.hyperedge_ids]
+
         return self.__class__(
             x=x,
             hyperedge_index=hyperedge_index_wrapper.to_0based().item,
+            hyperedge_weights=hyperedge_weights,
             hyperedge_attr=hyperedge_attr,
             num_nodes=hyperedge_index_wrapper.num_nodes,
             num_hyperedges=hyperedge_index_wrapper.num_hyperedges,
@@ -329,7 +430,7 @@ class HData:
         Examples:
             >>> hyperedge_index = torch.tensor([[0, 1, 2, 3], [0, 0, 1, 1]])
             >>> y  = torch.tensor([1, 0])
-            >>> hdata = HData(x, hyperedge_index=hyperedge_index, y=y)
+            >>> hdata = HData(x=x, hyperedge_index=hyperedge_index, y=y)
             >>> shuffled_hdata = hdata.shuffle(seed=42)
             >>> shuffled_hdata.hyperedge_index  # hyperedges may be reassigned
             ... # e.g.,
@@ -372,6 +473,10 @@ class HData:
             self.hyperedge_attr[permutation] if self.hyperedge_attr is not None else None
         )
 
+        new_hyperedge_weights = (
+            self.hyperedge_weights[permutation] if self.hyperedge_weights is not None else None
+        )
+
         # Example: y = [1, 1, 0], permutation = [1, 2, 0]
         #          -> new_y = [y[1], y[2], y[0]] = [1, 0, 1]
         new_y = self.y[permutation]
@@ -379,6 +484,7 @@ class HData:
         return self.__class__(
             x=self.x,
             hyperedge_index=new_hyperedge_index,
+            hyperedge_weights=new_hyperedge_weights,
             hyperedge_attr=new_hyperedge_attr,
             num_nodes=self.num_nodes,
             num_hyperedges=self.num_hyperedges,
@@ -403,6 +509,11 @@ class HData:
         if self.hyperedge_attr is not None:
             self.hyperedge_attr = self.hyperedge_attr.to(device=device, non_blocking=non_blocking)
 
+        if self.hyperedge_weights is not None:
+            self.hyperedge_weights = self.hyperedge_weights.to(
+                device=device, non_blocking=non_blocking
+            )
+
         self.device = device if isinstance(device, torch.device) else torch.device(device)
         return self
 
@@ -419,6 +530,7 @@ class HData:
         return self.__class__(
             x=self.x,
             hyperedge_index=self.hyperedge_index,
+            hyperedge_weights=self.hyperedge_weights,
             hyperedge_attr=self.hyperedge_attr,
             num_nodes=self.num_nodes,
             num_hyperedges=self.num_hyperedges,
@@ -438,6 +550,7 @@ class HData:
         Compute statistics for the hypergraph data.
         The fields returned in the dictionary include:
         - ``shape_x``: The shape of the node feature matrix ``x``.
+        - ``shape_hyperedge_weights``: The shape of the hyperedge weights tensor, or ``None`` if hyperedge weights are not present.
         - ``shape_hyperedge_attr``: The shape of the hyperedge attribute matrix, or ``None`` if hyperedge attributes are not present.
         - ``num_nodes``: The number of nodes in the hypergraph.
         - ``num_hyperedges``: The number of hyperedges in the hypergraph.
@@ -511,6 +624,9 @@ class HData:
 
         return {
             "shape_x": self.x.shape,
+            "shape_hyperedge_weights": self.hyperedge_weights.shape
+            if self.hyperedge_weights is not None
+            else None,
             "shape_hyperedge_attr": self.hyperedge_attr.shape
             if self.hyperedge_attr is not None
             else None,

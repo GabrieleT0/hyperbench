@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from torch import Tensor
 from torch.utils.data import Dataset as TorchDataset
 
-from hyperbench.nn import EnrichmentMode, NodeFeatureEnricher
+from hyperbench.nn import EnrichmentMode, NodeEnricher, HyperedgeEnricher
 from hyperbench.types import HData, HIFHypergraph
 from hyperbench.utils import validate_hif_json
 
@@ -269,25 +269,66 @@ class Dataset(TorchDataset):
         num_hyperedges = len(hyperedge_id_to_idx)
         hyperedge_attr = self.__process_hyperedge_attr(hyperedge_id_to_idx, num_hyperedges)
 
+        hyperedge_weights = self.__process_hyperedge_weights()
+
         hyperedge_index = torch.tensor([node_ids, hyperedge_ids], dtype=torch.long)
 
-        return HData(x, hyperedge_index, hyperedge_attr, num_nodes, num_hyperedges)
+        return HData(
+            x=x,
+            hyperedge_index=hyperedge_index,
+            hyperedge_weights=hyperedge_weights,
+            hyperedge_attr=hyperedge_attr,
+            num_nodes=num_nodes,
+            num_hyperedges=num_hyperedges,
+        )
 
     def enrich_node_features(
         self,
-        enricher: NodeFeatureEnricher,
+        enricher: NodeEnricher,
         enrichment_mode: Optional[EnrichmentMode] = None,
     ) -> None:
         """
         Enrich node features using the provided node feature enricher.
 
         Args:
-            enricher: An instance of NodeFeatureEnricher to generate structural node features from hypergraph topology.
+            enricher: An instance of NodeEnricher to generate structural node features from hypergraph topology.
             enrichment_mode: How to combine generated features with existing ``hdata.x``.
                 ``concatenate`` appends new features as additional columns.
                 ``replace`` substitutes ``hdata.x`` entirely.
         """
         self.hdata = self.hdata.enrich_node_features(enricher, enrichment_mode)
+
+    def enrich_hyperedge_attr(
+        self,
+        enricher: HyperedgeEnricher,
+        enrichment_mode: Optional[EnrichmentMode] = None,
+    ) -> None:
+        """Enrich hyperedge features using the provided hyperedge feature enricher.
+
+        Args:
+            enricher: An instance of HyperedgeEnricher to generate structural hyperedge features from hypergraph topology.
+            enrichment_mode: How to combine generated features with existing ``hdata.hyperedge_attr``.
+                ``concatenate`` appends new features as additional columns.
+                ``replace`` substitutes ``hdata.hyperedge_attr`` entirely.
+        """
+        self.hdata = self.hdata.enrich_hyperedge_attr(enricher, enrichment_mode)
+
+    def enrich_hyperedge_weights(
+        self,
+        enricher: HyperedgeEnricher,
+        enrichment_mode: Optional[EnrichmentMode] = None,
+        alpha: float = 1.0,
+        beta: Optional[float] = None,
+    ) -> None:
+        """Enrich hyperedge weights using the provided hyperedge weight enricher.
+
+        Args:
+            enricher: An instance of HyperedgeEnricher to generate structural hyperedge features from hypergraph topology.
+            enrichment_mode: How to combine generated features with existing ``hdata.hyperedge_weights``.
+                ``concatenate`` appends new features as additional columns.
+                ``replace`` substitutes ``hdata.hyperedge_weights`` entirely.
+        """
+        self.hdata = self.hdata.enrich_hyperedge_weights(enricher, enrichment_mode)
 
     def update_from_hdata(self, hdata: HData) -> "Dataset":
         """
@@ -503,14 +544,16 @@ class Dataset(TorchDataset):
     ) -> Optional[Tensor]:
         # hyperedge-attr: shape [num_hyperedges, num_hyperedge_attributes]
         hyperedge_attr = None
-        has_hyperedges = self.hypergraph.edges is not None and len(self.hypergraph.edges) > 0
+        has_hyperedges = (
+            self.hypergraph.hyperedges is not None and len(self.hypergraph.hyperedges) > 0
+        )
         has_any_hyperedge_attrs = has_hyperedges and any(
-            "attrs" in edge for edge in self.hypergraph.edges
+            "attrs" in edge for edge in self.hypergraph.hyperedges
         )
 
         if has_any_hyperedge_attrs:
             hyperedge_id_to_attrs: Dict[Any, Dict[str, Any]] = {
-                e.get("edge"): e.get("attrs", {}) for e in self.hypergraph.edges
+                e.get("edge"): e.get("attrs", {}) for e in self.hypergraph.hyperedges
             }
 
             hyperedge_attr_keys = self.__collect_attr_keys(list(hyperedge_id_to_attrs.values()))
@@ -552,6 +595,28 @@ class Dataset(TorchDataset):
             x = torch.ones((num_nodes, 1), dtype=torch.float)
 
         return x  # shape [num_nodes, num_node_features]
+
+    def __process_hyperedge_weights(self) -> Optional[Tensor]:
+        # Initialize the hyperedge weights tensor
+        hyperedge_weights = None
+
+        has_hyperedge_weights = self.hypergraph.hyperedges is not None and all(
+            "weight" in edge for edge in self.hypergraph.hyperedges
+        )
+
+        if has_hyperedge_weights:
+            weights = [edge.get("weight", 1.0) for edge in self.hypergraph.hyperedges]
+            hyperedge_weights = torch.tensor(weights, dtype=torch.float)
+        elif (
+            has_hyperedge_weights is False
+            and self.hypergraph.hyperedges is not None
+            and any("weight" in edge for edge in self.hypergraph.hyperedges)
+        ):
+            raise ValueError(
+                "Some hyperedges have weights while others do not. All hyperedges must either have weights or none."
+            )
+
+        return hyperedge_weights
 
     def stats(self) -> Dict[str, Any]:
         """

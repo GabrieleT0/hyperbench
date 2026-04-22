@@ -4,19 +4,14 @@ from abc import ABC
 from torch import Tensor
 from typing import Literal, Optional, TypeAlias
 from hyperbench.types import EdgeIndex, HyperedgeIndex
-
+import random
 
 EnrichmentMode: TypeAlias = Literal["concatenate", "replace"]
 
 
-class NodeFeatureEnricher(ABC):
+class Enricher(ABC):
     """
-    Generates structural node features from hypergraph topology.
-
-    For methods that require a regular graph (node2vec, eigenvector_centrality),
-    the hypergraph is converted via clique expansion using sparse H @ H^T.
-
-    Attributes:
+    Args:
         cache_dir: Directory for saving/loading cached features. If ``None``, caching is disabled.
     """
 
@@ -30,7 +25,88 @@ class NodeFeatureEnricher(ABC):
         raise NotImplementedError("Subclasses must implement the enrich method.")
 
 
-class LaplacianPositionalEncodingEnricher(NodeFeatureEnricher):
+class NodeEnricher(Enricher, ABC):
+    """
+    Base class for node enrichers.
+    """
+
+    pass
+
+
+class HyperedgeEnricher(Enricher, ABC):
+    """
+    Base class for hyperedge enrichers.
+    """
+
+    pass
+
+
+class HyperedgeAttrsEnricher(HyperedgeEnricher):
+    """
+    Base class for enrichers that generate hyperedge attributes (features).
+    Args:
+    - cache_dir: Directory for saving/loading cached features. If ``None``, caching is disabled.
+    """
+
+    def __init__(
+        self,
+        cache_dir: Optional[str] = None,
+    ):
+        super().__init__(cache_dir=cache_dir)
+
+    def enrich(self, hyperedge_index: Tensor) -> Tensor:
+
+        # add a feature of 1.0 for each hyperedge, which can be used as a baseline or for methods that require hyperedge features.
+        hyperedge_attrs = torch.ones(size=(hyperedge_index.size(1),), device=hyperedge_index.device)
+
+        return hyperedge_attrs
+
+
+class HyperedgeWeightsEnricher(HyperedgeEnricher):
+    """
+    Generates hyperedge weights based on the number of nodes in each hyperedge.
+    Args:
+    - cache_dir: Directory for saving/loading cached features. If ``None``, caching is disabled.
+    - alpha: Scaling factor for the random component added to weights. Must be between 0.0 and 1.0.
+    - beta: If provided, the random component is alpha * beta. If None, no random component is added.
+    """
+
+    def __init__(
+        self,
+        cache_dir: Optional[str] = None,
+        alpha: float = 1.0,
+        beta: Optional[float] = None,
+    ):
+        super().__init__(cache_dir=cache_dir)
+        if alpha < 0.0 or alpha > 1.0:
+            raise ValueError("Alpha must be between 0.0 and 1.0.")
+
+        self.alpha = alpha
+        self.beta = beta
+
+    def enrich(self, hyperedge_index: Tensor) -> Tensor:
+        """
+        Compute edge weights as the number of nodes in each hyperedge.
+
+        Args:
+            hyperedge_index: Hyperedge index tensor of shape ``(2, num_hyperedges)``.
+            alpha: Scaling factor for the random component added to weights.
+            beta: If provided, the random component is alpha * beta.
+        Returns:
+            Tensor of shape ``(num_hyperedges,)`` containing the weight of each hyperedge.
+        """
+        # Count the number of nodes in each hyperedge by counting occurrences of each hyperedge index.
+        # Example: if hyperedge_index[1] = [0, 0, 1, 1, 1], then we have 2 nodes in hyperedge 0 and 3 nodes in hyperedge 1.
+        num_hyperedges = int(hyperedge_index[1].max().item()) + 1
+        weights = torch.bincount(hyperedge_index[1], minlength=num_hyperedges).float()
+
+        random_alpha = random.uniform(0, self.alpha)
+        if self.beta is not None:
+            weights += random_alpha * self.beta
+        return weights
+
+
+class LaplacianPositionalEncodingEnricher(NodeEnricher):
     def __init__(
         self,
         num_features: int,

@@ -36,6 +36,7 @@ class DataLoader(TorchDataLoader):
         - Concatenating node features from all samples.
         - Concatenating and offsetting hyperedges from all samples.
         - Concatenating hyperedge attributes from all samples, if present.
+        - Concatenating hyperedge weights from all samples, if present.
 
         Examples:
             Given ``batch = [HData_0, HData_1]``:
@@ -83,11 +84,18 @@ class DataLoader(TorchDataLoader):
         if self.__cached_dataset_hdata.hyperedge_attr is not None:
             collated_hyperedge_attr = self.__cached_dataset_hdata.hyperedge_attr[hyperedge_ids]
 
+        collated_hyperedge_weights = None
+        if self.__cached_dataset_hdata.hyperedge_weights is not None:
+            collated_hyperedge_weights = self.__cached_dataset_hdata.hyperedge_weights[
+                hyperedge_ids
+            ]
+
         collated_hyperedge_index = hyperedge_index_wrapper.to_0based().item
 
         collated_hdata = HData(
             x=collated_x,
             hyperedge_index=collated_hyperedge_index,
+            hyperedge_weights=collated_hyperedge_weights,
             hyperedge_attr=collated_hyperedge_attr,
             num_nodes=hyperedge_index_wrapper.num_nodes,
             num_hyperedges=hyperedge_index_wrapper.num_hyperedges,
