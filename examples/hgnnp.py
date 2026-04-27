@@ -6,11 +6,12 @@ from torchmetrics.classification import (
     BinaryRecall,
 )
 from lightning.pytorch.callbacks import EarlyStopping
-from hyperbench.hlp import HGNNHlpModule
+
+from hyperbench.data import AlgebraDataset, DataLoader, SamplingStrategy
+from hyperbench.hlp import HGNNPHlpModule
 from hyperbench.nn import LaplacianPositionalEncodingEnricher
 from hyperbench.train import MultiModelTrainer, RandomNegativeSampler
 from hyperbench.types import HData, ModelConfig
-from hyperbench.data import AlgebraDataset, DataLoader, SamplingStrategy
 
 
 if __name__ == "__main__":
@@ -32,10 +33,7 @@ if __name__ == "__main__":
     if verbose:
         print(f"Dataset:\n {dataset.hdata}\n")
 
-    # Split dataset into train and test (80/20)
     train_dataset, test_dataset = dataset.split(ratios=[0.8, 0.2], shuffle=True, seed=42)
-
-    # Split train into train and val (87.5/12.5 of train = 70/10 of total)
     train_dataset, val_dataset = train_dataset.split(ratios=[0.875, 0.125], shuffle=True, seed=42)
     if verbose:
         print(f"Train dataset (before train/val split):\n {train_dataset.hdata}\n")
@@ -43,15 +41,13 @@ if __name__ == "__main__":
         print(f"Val dataset:\n {val_dataset.hdata}\n")
         print(f"Test dataset:\n {test_dataset.hdata}\n")
 
-    # Save train hyperedge index before adding negatives (for CommonNeighbors)
     train_hyperedge_index = train_dataset.hdata.hyperedge_index
 
-    # Add negative samples to all splits
     for name, ds in [("Train", train_dataset), ("Val", val_dataset), ("Test", test_dataset)]:
         num_negative_samples = (
             ds.hdata.num_hyperedges
-            if name in ["Train", "Val"]  # 1:1 ratio of pos:neg samples
-            else int(ds.hdata.num_hyperedges * 0.6)  # 60% negatives for test set
+            if name in ["Train", "Val"]
+            else int(ds.hdata.num_hyperedges * 0.6)
         )
         negative_sampler = RandomNegativeSampler(
             num_negative_samples=num_negative_samples,
@@ -105,7 +101,7 @@ if __name__ == "__main__":
         persistent_workers=True,
     )
 
-    mean_hgnn_module = HGNNHlpModule(
+    mean_hgnnp_module = HGNNPHlpModule(
         encoder_config={
             "in_channels": 32,
             "hidden_channels": 16,
@@ -122,9 +118,9 @@ if __name__ == "__main__":
 
     configs = [
         ModelConfig(
-            name="hgnn",
+            name="hgnnp",
             version="mean",
-            model=mean_hgnn_module,
+            model=mean_hgnnp_module,
             train_dataloader=train_loader_full_hypergraph,
             val_dataloader=val_loader_full_hypergraph,
             test_dataloader=test_loader_full_hypergraph,

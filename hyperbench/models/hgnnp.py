@@ -1,16 +1,13 @@
 from torch import Tensor, nn
-from hyperbench.nn import HGNNConv
+from hyperbench.nn import HGNNPConv
 
 
-class HGNN(nn.Module):
+class HGNNP(nn.Module):
     """
-    HGNN performs spectral convolution directly on the hypergraph structure using the
-    node-hyperedge incidence matrix, without any reduction to a pairwise graph.
-    Unlike HyperGCN (which approximates each hyperedge by selecting representative pairwise
-    edges via random projection), HGNN preserves all higher-order relationships by passing
-    messages through the full incidence structure: nodes -> hyperedges -> nodes.
-    - Proposed in `Hypergraph Neural Networks <https://arxiv.org/pdf/1809.09401>`_ paper (AAAI 2019).
-    - Reference implementation: `source <https://deephypergraph.readthedocs.io/en/latest/_modules/dhg/models/hypergraphs/hgnn.html#HGNN>`_.
+    HGNN+ performs hypergraph convolution with two-stage mean aggregation using the
+    incidence structure directly: nodes -> hyperedges -> nodes.
+    - Proposed in `HGNN+: General Hypergraph Neural Networks <https://ieeexplore.ieee.org/document/9795251>`_ paper (IEEE T-PAMI 2022).
+    - Reference implementation: `source <https://deephypergraph.readthedocs.io/en/latest/_modules/dhg/models/hypergraphs/hgnnp.html#HGNNP>`_.
 
     Args:
         in_channels: The number of input channels.
@@ -34,14 +31,14 @@ class HGNN(nn.Module):
 
         self.layers = nn.ModuleList(
             [
-                HGNNConv(
+                HGNNPConv(
                     in_channels=in_channels,
                     out_channels=hidden_channels,
                     bias=bias,
                     use_batch_normalization=use_batch_normalization,
                     drop_rate=drop_rate,
                 ),
-                HGNNConv(
+                HGNNPConv(
                     in_channels=hidden_channels,
                     out_channels=num_classes,
                     bias=bias,
@@ -53,11 +50,7 @@ class HGNN(nn.Module):
 
     def forward(self, x: Tensor, hyperedge_index: Tensor) -> Tensor:
         """
-        Apply two stacked ``HGNNConv`` layers to produce node embeddings.
-
-        The first layer applies ReLU + dropout and maps ``in_channels -> hidden_channels``.
-        The second layer is the output layer (no activation/dropout) and maps
-        ``hidden_channels -> num_classes``.
+        Apply two stacked ``HGNNPConv`` layers to produce node embeddings.
 
         Args:
             x: Input node feature matrix. Size ``(num_nodes, in_channels)``.

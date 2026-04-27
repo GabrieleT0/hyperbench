@@ -45,7 +45,7 @@ class HyperGCNConv(nn.Module):
         hyperedge_index: Tensor,
         gcn_laplacian_matrix: Optional[Tensor] = None,
     ) -> Tensor:
-        r"""
+        """
         The forward function.
 
         Args:
@@ -123,13 +123,8 @@ class HGNNConv(nn.Module):
         self.dropout = nn.Dropout(drop_rate)
         self.theta = nn.Linear(in_channels, out_channels, bias=bias)
 
-    def forward(
-        self,
-        x: Tensor,
-        hyperedge_index: Tensor,
-        hgnn_laplacian_matrix: Optional[Tensor] = None,
-    ) -> Tensor:
-        r"""
+    def forward(self, x: Tensor, hyperedge_index: Tensor) -> Tensor:
+        """
         Apply one HGNN convolution layer: project features, smooth via hypergraph Laplacian,
         then apply activation, batch norm, and dropout (unless this is the last layer).
 
@@ -144,22 +139,84 @@ class HGNNConv(nn.Module):
             x: Input node feature matrix. Size ``(num_nodes, in_channels)``.
             hyperedge_index: Hyperedge incidence in COO format. Size ``(2, num_incidences)``,
                 where row 0 contains node IDs and row 1 contains hyperedge IDs.
-            hgnn_laplacian_matrix: Optional precomputed HGNN Laplacian
-                ``D_n^{-1/2} H D_e^{-1} H^T D_n^{-1/2}``. Size ``(num_nodes, num_nodes)``.
-                If provided, skips recomputing the Laplacian from ``hyperedge_index``.
 
         Returns:
             The output node feature matrix. Size ``(num_nodes, out_channels)``.
         """
         x = self.theta(x)
 
-        if hgnn_laplacian_matrix is not None:
-            x = Hypergraph.smoothing_with_laplacian_matrix(x, hgnn_laplacian_matrix)
-        else:
-            laplacian = HyperedgeIndex(hyperedge_index).get_sparse_hgnn_laplacian(
-                num_nodes=x.size(0),
-            )
-            x = Hypergraph.smoothing_with_laplacian_matrix(x, laplacian)
+        smoothing_matrix = HyperedgeIndex(hyperedge_index).get_sparse_hgnn_smoothing_matrix(
+            num_nodes=x.size(0),
+        )
+        x = Hypergraph.smoothing_with_matrix(x, smoothing_matrix)
+
+        if not self.is_last:
+            x = self.activation_fn(x)
+            if self.batch_norm_1d is not None:
+                x = self.batch_norm_1d(x)
+            x = self.dropout(x)
+
+        return x
+
+
+class HGNNPConv(nn.Module):
+    """
+    The HGNNPConv layer proposed in `HGNN+: General Hypergraph Neural Networks <https://ieeexplore.ieee.org/document/9795251>`_ paper (IEEE T-PAMI 2022).
+    Reference implementation: `source <https://deephypergraph.readthedocs.io/en/latest/_modules/dhg/nn/convs/hypergraphs/hgnnp_conv.html#HGNNPConv>`_.
+
+    Each layer performs: ``X' = sigma(M_HGNN+ X Theta)`` where
+    ``M_HGNN+ = D_v^{-1} H D_e^{-1} H^T`` is the HGNN+ smoothing matrix.
+
+    Unlike ``HGNNConv``, which uses symmetric ``D_v^{-1/2}`` normalization for a
+    spectral Laplacian, ``HGNNPConv`` uses plain inverse degrees and performs
+    two-stage mean aggregation: nodes -> hyperedges -> nodes.
+
+    Args:
+        in_channels: The number of input channels.
+        out_channels: The number of output channels.
+        bias: If set to ``False``, the layer will not learn the bias parameter. Defaults to ``True``.
+        use_batch_normalization: If set to ``True``, the layer will use batch normalization. Defaults to ``False``.
+        drop_rate: If set to a positive number, the layer will use dropout. Defaults to ``0.5``.
+        is_last: If set to ``True``, the layer will not apply the final activation and dropout functions. Defaults to ``False``.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        bias: bool = True,
+        use_batch_normalization: bool = False,
+        drop_rate: float = 0.5,
+        is_last: bool = False,
+    ):
+        super().__init__()
+        self.is_last = is_last
+        self.batch_norm_1d = nn.BatchNorm1d(out_channels) if use_batch_normalization else None
+        self.activation_fn = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(drop_rate)
+        self.theta = nn.Linear(in_channels, out_channels, bias=bias)
+
+    def forward(self, x: Tensor, hyperedge_index: Tensor) -> Tensor:
+        """
+        Apply one HGNN+ convolution layer using row-stochastic hypergraph smoothing.
+
+        The full per-layer formula is:
+            ``X' = sigma( D_v^{-1} H D_e^{-1} H^T (X Theta) )``
+
+        Args:
+            x: Input node feature matrix. Size ``(num_nodes, in_channels)``.
+            hyperedge_index: Hyperedge incidence in COO format. Size ``(2, num_incidences)``,
+                where row 0 contains node IDs and row 1 contains hyperedge IDs.
+
+        Returns:
+            The output node feature matrix. Size ``(num_nodes, out_channels)``.
+        """
+        x = self.theta(x)
+
+        smoothing_matrix = HyperedgeIndex(hyperedge_index).get_sparse_hgnnp_smoothing_matrix(
+            num_nodes=x.size(0),
+        )
+        x = Hypergraph.smoothing_with_matrix(x, smoothing_matrix)
 
         if not self.is_last:
             x = self.activation_fn(x)
