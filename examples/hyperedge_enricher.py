@@ -5,10 +5,9 @@ from hyperbench.data import AlgebraDataset, SamplingStrategy
 if __name__ == "__main__":
     print("Loading and preparing dataset...\n")
 
-    dataset = AlgebraDataset(sampling_strategy=SamplingStrategy.HYPEREDGE, prepare=True)
+    dataset = AlgebraDataset(sampling_strategy=SamplingStrategy.HYPEREDGE)
 
     print("Enriching hyperedge weights...")
-
     # HyperedgeWeightsEnricher enriches hyperedges with their degree (number of nodes in each hyperedge) as weights.
     # It optionally applies scaling and adds a constant to the weights.
     dataset.enrich_hyperedge_weights(
@@ -25,8 +24,7 @@ if __name__ == "__main__":
 
     print("Enriching hyperedge attributes...")
 
-    # HyperedgeAttrsEnricher adds a feature of 1.0 for each hyperedge,
-    # which can be used as a baseline or for methods that require hyperedge features.
+    # HyperedgeAttrsEnricher adds a feature of 1.0 for each hyperedge, which can be used as a baseline or for methods that require hyperedge features.
     dataset.enrich_hyperedge_attr(
         enricher=HyperedgeAttrsEnricher(),
         enrichment_mode="replace",

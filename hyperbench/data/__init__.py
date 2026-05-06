@@ -1,7 +1,5 @@
-from .dataset import (
-    Dataset,
-    HIFConverter,
-)
+from .dataset import Dataset
+from .hif import HIFLoader, HIFProcessor
 
 from .supported_datasets import (
     AlgebraDataset,
@@ -54,7 +52,8 @@ __all__ = [
     "EmailW3CDataset",
     "GeometryDataset",
     "GOTDataset",
-    "HIFConverter",
+    "HIFLoader",
+    "HIFProcessor",
     "HyperedgeSampler",
     "IMDBDataset",
     "MusicBluesReviewsDataset",
