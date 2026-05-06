@@ -12,7 +12,7 @@
 
 ## About the project
 
-Hyperbench helps you test all your favorite machine learning models!wq
+WIP
 
 ## Getting started
 
